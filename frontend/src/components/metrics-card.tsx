@@ -1,16 +1,42 @@
 import { useEffect, useState } from 'react';
-import { fetchStats, startStatsPolling, subscribeToStats, type StatsSnapshot } from '~/lib/api';
+import {
+    fetchStatsForSelection,
+    selectionToSourceId,
+    startStatsPolling,
+    subscribeToStats,
+    type BackendSelection,
+    type StatsSnapshot,
+} from '~/lib/api';
 import { Badge } from './ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 
 type StreamMode = 'sse' | 'polling';
 
-export function MetricsCard() {
+type MetricsCardProps = {
+  selection: BackendSelection;
+};
+
+export function MetricsCard({ selection }: MetricsCardProps) {
   const [snapshot, setSnapshot] = useState<StatsSnapshot | null>(null);
   const [streamMode, setStreamMode] = useState<StreamMode>('sse');
 
   useEffect(() => {
     let stopPolling: (() => void) | null = null;
+    const sourceId = selectionToSourceId(selection);
+
+    if (selection === 'all' || !sourceId) {
+      setStreamMode('polling');
+      stopPolling = startStatsPolling(setSnapshot, {
+        selection,
+        intervalMs: 1000,
+      });
+
+      return () => {
+        if (stopPolling) {
+          stopPolling();
+        }
+      };
+    }
 
     const stopSse = subscribeToStats(
       (nextSnapshot) => {
@@ -26,12 +52,16 @@ export function MetricsCard() {
       () => {
         if (!stopPolling) {
           setStreamMode('polling');
-          stopPolling = startStatsPolling(setSnapshot);
+          stopPolling = startStatsPolling(setSnapshot, {
+            selection,
+            intervalMs: 1000,
+          });
         }
       },
+      sourceId,
     );
 
-    void fetchStats().then(setSnapshot).catch(() => undefined);
+    void fetchStatsForSelection(selection).then(setSnapshot).catch(() => undefined);
 
     return () => {
       stopSse();
@@ -39,7 +69,7 @@ export function MetricsCard() {
         stopPolling();
       }
     };
-  }, []);
+  }, [selection]);
 
   return (
     <Card className="animate-floatIn">
@@ -47,16 +77,17 @@ export function MetricsCard() {
         <div className="flex items-center justify-between gap-3">
           <CardTitle>Live Kafka Ingestion</CardTitle>
           <Badge variant={streamMode === 'sse' ? 'default' : 'secondary'}>
-            {streamMode === 'sse' ? 'SSE' : 'Polling'}
+            {selection === 'all' ? 'Combined Polling' : streamMode === 'sse' ? 'SSE' : 'Polling'}
           </Badge>
         </div>
       </CardHeader>
 
-      <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Metric label="Events/sec" value={snapshot?.eventsPerSecond ?? 0} />
-        <Metric label="Total Consumed" value={snapshot?.totalEvents ?? 0} />
-        <Metric label="Instance" value={snapshot?.instanceId ?? '-'} mono />
-        <Metric label="Local Count" value={snapshot?.localConsumed ?? 0} />
+        <Metric label="Total Persisted" value={snapshot?.totalEvents ?? 0} />
+        <Metric label="Scope" value={selection} mono />
+        <Metric label="Serving Instance" value={snapshot?.instanceId ?? '-'} mono />
+        <Metric label="Local Consumed" value={snapshot?.localConsumed ?? 0} />
       </CardContent>
     </Card>
   );

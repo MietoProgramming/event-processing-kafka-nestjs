@@ -16,6 +16,7 @@ This repository is a local learning lab for high-throughput event processing:
 3. Two backend containers (`backend-1`, `backend-2`) share the same `groupId` and split partition ownership.
 4. Backend services batch-insert events into PostgreSQL `events` table (RANGE partitioned by `created_at`).
 5. Frontend reads live stats from SSE and fetches latest 100 rows via REST.
+6. Dashboard analytics endpoint powers throughput graphs, partition distribution, and per-instance ownership views.
 
 ## Project Structure
 
@@ -50,6 +51,13 @@ Useful API checks:
 curl http://localhost:3001/api/health
 curl http://localhost:3001/api/stats
 curl http://localhost:3001/api/events/latest?limit=5
+curl "http://localhost:3001/api/dashboard/analytics?windowMinutes=15&bucketSeconds=10"
+```
+
+You can scope analytics to one backend instance:
+
+```bash
+curl "http://localhost:3001/api/dashboard/analytics?windowMinutes=15&bucketSeconds=10&processedBy=backend-1"
 ```
 
 ## 3) Observe Kafka partition load balancing
@@ -98,9 +106,28 @@ SELECT COUNT(*) FROM events;
 ## Implementation Notes
 
 - PostgreSQL trigger `create_daily_events_partition()` creates a day partition at insert time if missing.
+- Backend persists `processed_by` and `kafka_partition` metadata per event for partition-aware analytics.
 - Backend metrics endpoint uses database aggregates so stats stay accurate across both backend instances.
 - SSE endpoint: `/api/stats/stream`.
-- Latest events endpoint: `/api/events/latest?limit=100`.
+- Latest events endpoint: `/api/events/latest?limit=100&processedBy=backend-1`.
+- Dashboard analytics endpoint: `/api/dashboard/analytics?windowMinutes=15&bucketSeconds=10&processedBy=backend-1`.
+
+## Frontend Dashboard Features
+
+- Backend scope switcher: choose `all-instances`, `backend-1`, or `backend-2`.
+- Throughput graph: rolling bucketed event-rate trend over a selectable time window.
+- Partition load panel: event counts per Kafka partition in the selected window.
+- Partition ownership matrix: which backend instance processed each partition.
+- Event type bars: top event types in the selected time window.
+- Latest events table now includes processing instance and Kafka partition columns.
+
+Optional frontend env for custom instance list:
+
+```bash
+VITE_API_INSTANCES=backend-1=http://localhost:3001/api,backend-2=http://localhost:3002/api
+```
+
+`id` values in `VITE_API_INSTANCES` should match backend `INSTANCE_ID` values for instance-specific filtering.
 
 ## Stop everything
 

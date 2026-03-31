@@ -1,18 +1,14 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import {
-    Ctx,
-    EventPattern,
-    KafkaContext,
-    Payload,
-} from '@nestjs/microservices';
+import { KafkaContext } from '@nestjs/microservices';
+import { sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import type { DrizzleDatabase } from './db/client';
 import { DRIZZLE_DB } from './db/database.module';
 import { eventsTable, type EventInsert } from './db/schema';
 
-type KafkaPayloadValue = {
+export type KafkaPayloadValue = {
   key?: Buffer | string | null;
-  value?: Buffer | string | null;
+  value?: Buffer | string | Record<string, unknown> | null;
 };
 
 @Injectable()
@@ -31,7 +27,9 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
 
   constructor(@Inject(DRIZZLE_DB) private readonly db: DrizzleDatabase) {}
 
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
+    await this.ensureEventsAnalyticsColumns();
+
     this.flushTimer = setInterval(() => {
       void this.flushBufferedEvents();
     }, this.flushIntervalMs);
@@ -54,12 +52,8 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
     return this.localConsumedCount;
   }
 
-  @EventPattern('events.page_views')
-  async consumeEvent(
-    @Payload() payload: KafkaPayloadValue,
-    @Ctx() context: KafkaContext,
-  ): Promise<void> {
-    const parsed = this.parseIncomingEvent(payload);
+  async consumeEvent(payload: KafkaPayloadValue, context: KafkaContext): Promise<void> {
+    const parsed = this.parseIncomingEvent(payload, context.getPartition());
 
     if (!parsed) {
       return;
@@ -79,17 +73,37 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private parseIncomingEvent(payload: KafkaPayloadValue): EventInsert | null {
+  private async ensureEventsAnalyticsColumns(): Promise<void> {
+    await this.db.execute(
+      sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS processed_by VARCHAR(64) NOT NULL DEFAULT 'unknown'`,
+    );
+    await this.db.execute(
+      sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS kafka_partition INTEGER NOT NULL DEFAULT -1`,
+    );
+    await this.db.execute(sql`ALTER TABLE events ALTER COLUMN processed_by DROP DEFAULT`);
+    await this.db.execute(sql`ALTER TABLE events ALTER COLUMN kafka_partition DROP DEFAULT`);
+    await this.db.execute(
+      sql`CREATE INDEX IF NOT EXISTS idx_events_processed_by_created_at ON events (processed_by, created_at DESC)`,
+    );
+    await this.db.execute(
+      sql`CREATE INDEX IF NOT EXISTS idx_events_partition_created_at ON events (kafka_partition, created_at DESC)`,
+    );
+  }
+
+  private parseIncomingEvent(payload: KafkaPayloadValue, kafkaPartition: number): EventInsert | null {
     const rawValue = payload.value;
 
     if (!rawValue) {
       return null;
     }
 
-    const serialized = Buffer.isBuffer(rawValue) ? rawValue.toString('utf8') : rawValue;
-
     try {
-      const event = JSON.parse(serialized) as Record<string, unknown>;
+      const event: Record<string, unknown> =
+        typeof rawValue === 'string'
+          ? (JSON.parse(rawValue) as Record<string, unknown>)
+          : Buffer.isBuffer(rawValue)
+            ? (JSON.parse(rawValue.toString('utf8')) as Record<string, unknown>)
+            : rawValue;
       const createdAtRaw = event.created_at;
       const createdAtCandidate =
         typeof createdAtRaw === 'string' ? new Date(createdAtRaw) : new Date();
@@ -99,6 +113,8 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
         id: typeof event.id === 'string' ? event.id : randomUUID(),
         userId: typeof event.user_id === 'string' ? event.user_id : 'unknown',
         eventType: typeof event.event_type === 'string' ? event.event_type : 'unknown',
+        processedBy: this.instanceId,
+        kafkaPartition,
         payload:
           typeof event.payload === 'object' && event.payload !== null
             ? (event.payload as Record<string, unknown>)

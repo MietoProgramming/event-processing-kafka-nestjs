@@ -1,16 +1,24 @@
 import {
     Controller,
+    DefaultValuePipe,
     Get,
+    Inject,
     MessageEvent,
+    ParseIntPipe,
     Query,
     Sse,
 } from '@nestjs/common';
 import { Observable, catchError, from, interval, map, of, startWith, switchMap } from 'rxjs';
-import { StatsService, type LatestEventRow, type StatsSnapshot } from './stats.service';
+import {
+    StatsService,
+    type DashboardAnalyticsSnapshot,
+    type LatestEventRow,
+    type StatsSnapshot,
+} from './stats.service';
 
 @Controller()
 export class AppController {
-  constructor(private readonly statsService: StatsService) {}
+  constructor(@Inject(StatsService) private readonly statsService: StatsService) {}
 
   @Get('health')
   getHealth(): { status: 'ok' } {
@@ -18,11 +26,27 @@ export class AppController {
   }
 
   @Get('events/latest')
-  async getLatestEvents(@Query('limit') limit?: string): Promise<LatestEventRow[]> {
+  async getLatestEvents(
+    @Query('limit') limit?: string,
+    @Query('processedBy') processedBy?: string,
+  ): Promise<LatestEventRow[]> {
     const parsedLimit = Number(limit ?? 100);
     const effectiveLimit = Number.isFinite(parsedLimit) ? parsedLimit : 100;
 
-    return this.statsService.getLatestEvents(effectiveLimit);
+    return this.statsService.getLatestEvents(effectiveLimit, processedBy);
+  }
+
+  @Get('dashboard/analytics')
+  async getDashboardAnalytics(
+    @Query('windowMinutes', new DefaultValuePipe(15), ParseIntPipe) windowMinutes: number,
+    @Query('bucketSeconds', new DefaultValuePipe(10), ParseIntPipe) bucketSeconds: number,
+    @Query('processedBy') processedBy?: string,
+  ): Promise<DashboardAnalyticsSnapshot> {
+    return this.statsService.getDashboardAnalytics({
+      windowMinutes,
+      bucketSeconds,
+      processedBy,
+    });
   }
 
   @Get('stats')

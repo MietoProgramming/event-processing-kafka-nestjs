@@ -4,14 +4,23 @@ CREATE TABLE IF NOT EXISTS events (
     id UUID NOT NULL DEFAULT gen_random_uuid(),
     user_id VARCHAR(128) NOT NULL,
     event_type VARCHAR(128) NOT NULL,
+    processed_by VARCHAR(64) NOT NULL,
+    kafka_partition INTEGER NOT NULL,
     payload JSONB NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);
 
+ALTER TABLE events ADD COLUMN IF NOT EXISTS processed_by VARCHAR(64) NOT NULL DEFAULT 'unknown';
+ALTER TABLE events ADD COLUMN IF NOT EXISTS kafka_partition INTEGER NOT NULL DEFAULT -1;
+ALTER TABLE events ALTER COLUMN processed_by DROP DEFAULT;
+ALTER TABLE events ALTER COLUMN kafka_partition DROP DEFAULT;
+
 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_events_user_created_at ON events (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_events_event_type_created_at ON events (event_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_events_processed_by_created_at ON events (processed_by, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_events_partition_created_at ON events (kafka_partition, created_at DESC);
 
 CREATE OR REPLACE FUNCTION create_daily_events_partition()
 RETURNS TRIGGER

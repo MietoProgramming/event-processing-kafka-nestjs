@@ -34,6 +34,19 @@ export function EventsTable({ events }: EventsTableProps) {
         header: 'Event',
       },
       {
+        accessorKey: 'processed_by',
+        header: 'Processed By',
+        cell: ({ getValue }) => <span className="font-mono text-xs">{getValue<string>()}</span>,
+      },
+      {
+        accessorKey: 'kafka_partition',
+        header: 'Partition',
+        cell: ({ getValue }) => {
+          const partition = getValue<number>();
+          return <span className="font-mono text-xs">p{partition}</span>;
+        },
+      },
+      {
         id: 'path',
         header: 'Path',
         cell: ({ row }) => {

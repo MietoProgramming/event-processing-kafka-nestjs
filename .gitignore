@@ -2,6 +2,7 @@ node_modules
 .env
 *.log
 backend/dist
+frontend/dist
 frontend/.tanstack
 frontend/.output
 frontend/node_modules
