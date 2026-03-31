@@ -1,0 +1,167 @@
+name: kafka-event-processing-lab
+
+services:
+  kafka:
+    image: apache/kafka:latest
+    hostname: kafka
+    ports:
+      - "9094:9094"
+    environment:
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_NODE_ID: "1"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_NUM_PARTITIONS: "6"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+    networks:
+      - event-net
+
+  kafka-init:
+    image: apache/kafka:latest
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -ec
+      - >
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic events.page_views --partitions 6 --replication-factor 1 &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic events.page_views
+    restart: "no"
+    networks:
+      - event-net
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: eventsdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d eventsdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - event-net
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_READONLY: "false"
+    networks:
+      - event-net
+
+  generator:
+    build:
+      context: ./generator
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC: events.page_views
+      EVENTS_PER_SECOND: "1000"
+    restart: unless-stopped
+    networks:
+      - event-net
+
+  backend-1:
+    build:
+      context: ./backend
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: "3001"
+      INSTANCE_ID: backend-1
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/eventsdb
+      KAFKA_BROKER: kafka:9092
+      KAFKA_TOPIC: events.page_views
+      KAFKA_GROUP_ID: analytics-consumer
+      KAFKA_CLIENT_ID: analytics-consumer-client
+      KAFKA_POSTFIX_ID: ""
+      BATCH_SIZE: "500"
+      FLUSH_INTERVAL_MS: "500"
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+    networks:
+      - event-net
+
+  backend-2:
+    build:
+      context: ./backend
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: "3002"
+      INSTANCE_ID: backend-2
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/eventsdb
+      KAFKA_BROKER: kafka:9092
+      KAFKA_TOPIC: events.page_views
+      KAFKA_GROUP_ID: analytics-consumer
+      KAFKA_CLIENT_ID: analytics-consumer-client
+      KAFKA_POSTFIX_ID: ""
+      BATCH_SIZE: "500"
+      FLUSH_INTERVAL_MS: "500"
+    ports:
+      - "3002:3002"
+    restart: unless-stopped
+    networks:
+      - event-net
+
+  frontend:
+    build:
+      context: ./frontend
+    depends_on:
+      backend-1:
+        condition: service_started
+      backend-2:
+        condition: service_started
+    environment:
+      VITE_API_BASE_URL: http://localhost:3001/api
+      VITE_API_BASE_URL_FALLBACK: http://localhost:3002/api
+      PORT: "5173"
+    ports:
+      - "5173:5173"
+    restart: unless-stopped
+    networks:
+      - event-net
+
+volumes:
+  pg_data:
+
+networks:
+  event-net:
+    driver: bridge

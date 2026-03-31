@@ -1,0 +1,27 @@
+{
+    "name": "analytics-kafka-backend",
+    "version": "1.0.0",
+    "private": true,
+    "scripts": {
+        "start": "tsx src/main.ts",
+        "start:dev": "tsx watch src/main.ts"
+    },
+    "dependencies": {
+        "@nestjs/common": "^10.4.15",
+        "@nestjs/config": "^3.3.0",
+        "@nestjs/core": "^10.4.15",
+        "@nestjs/microservices": "^10.4.15",
+        "@nestjs/platform-express": "^10.4.15",
+        "drizzle-orm": "^0.36.4",
+        "kafkajs": "^2.2.4",
+        "pg": "^8.13.1",
+        "reflect-metadata": "^0.2.2",
+        "rxjs": "^7.8.1"
+    },
+    "devDependencies": {
+        "@types/node": "^22.10.1",
+        "@types/pg": "^8.11.11",
+        "tsx": "^4.19.2",
+        "typescript": "^5.7.2"
+    }
+}

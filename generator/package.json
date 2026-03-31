@@ -1,0 +1,11 @@
+{
+    "name": "kafka-page-view-generator",
+    "version": "1.0.0",
+    "private": true,
+    "scripts": {
+        "start": "node index.js"
+    },
+    "dependencies": {
+        "kafkajs": "^2.2.4"
+    }
+}
