@@ -14,6 +14,10 @@ async function bootstrap(): Promise<void> {
   const kafkaPostfixId = process.env.KAFKA_POSTFIX_ID ?? '';
   const kafkaClientIdBase = process.env.KAFKA_CLIENT_ID ?? 'analytics-consumer-client';
   const kafkaClientId = `${kafkaClientIdBase}-${instanceId}`;
+  const kafkaTopics = (process.env.KAFKA_TOPICS ?? 'events.page_views,events.clicks,events.purchases')
+    .split(',')
+    .map((topic) => topic.trim())
+    .filter((topic) => topic.length > 0);
 
   const app = await NestFactory.create(AppModule);
 
@@ -47,7 +51,7 @@ async function bootstrap(): Promise<void> {
   await app.listen(httpPort, '0.0.0.0');
 
   logger.log(`HTTP listening on :${httpPort}`);
-  logger.log(`Kafka broker=${kafkaBroker} topic=events.page_views groupId=${kafkaGroupId}`);
+  logger.log(`Kafka broker=${kafkaBroker} topics=${kafkaTopics.join(',')} groupId=${kafkaGroupId}`);
   logger.log(`Instance ID=${instanceId}`);
 }
 

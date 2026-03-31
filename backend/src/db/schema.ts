@@ -6,6 +6,7 @@ export const eventsTable = pgTable('events', {
   eventType: varchar('event_type', { length: 128 }).notNull(),
   processedBy: varchar('processed_by', { length: 64 }).notNull(),
   kafkaPartition: integer('kafka_partition').notNull(),
+  kafkaTopic: varchar('kafka_topic', { length: 128 }).notNull(),
   payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
   createdAt: timestamp('created_at', { mode: 'date', withTimezone: false }).notNull(),
 });

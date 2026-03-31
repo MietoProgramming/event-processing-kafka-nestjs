@@ -4,6 +4,7 @@ export type LatestEvent = {
   event_type: string;
   processed_by: string;
   kafka_partition: number;
+  kafka_topic: string;
   payload: Record<string, unknown>;
   created_at: string;
 };
@@ -26,7 +27,13 @@ export type EventTypeDistributionRow = {
   count: number;
 };
 
+export type TopicDistributionRow = {
+  kafka_topic: string;
+  count: number;
+};
+
 export type PartitionDistributionRow = {
+  kafka_topic: string;
   kafka_partition: number;
   count: number;
 };
@@ -37,6 +44,7 @@ export type InstanceDistributionRow = {
 };
 
 export type PartitionOwnershipRow = {
+  kafka_topic: string;
   kafka_partition: number;
   processed_by: string;
   count: number;
@@ -50,6 +58,7 @@ export type DashboardAnalyticsSnapshot = {
   total_events_in_window: number;
   throughput: ThroughputPoint[];
   event_type_distribution: EventTypeDistributionRow[];
+  topic_distribution: TopicDistributionRow[];
   partition_distribution: PartitionDistributionRow[];
   instance_distribution: InstanceDistributionRow[];
   partition_ownership: PartitionOwnershipRow[];

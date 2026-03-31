@@ -34,6 +34,11 @@ export function EventsTable({ events }: EventsTableProps) {
         header: 'Event',
       },
       {
+        accessorKey: 'kafka_topic',
+        header: 'Topic',
+        cell: ({ getValue }) => <span className="font-mono text-xs">{getValue<string>()}</span>,
+      },
+      {
         accessorKey: 'processed_by',
         header: 'Processed By',
         cell: ({ getValue }) => <span className="font-mono text-xs">{getValue<string>()}</span>,

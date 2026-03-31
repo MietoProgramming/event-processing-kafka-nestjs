@@ -58,8 +58,8 @@ export function ProcessingAnalytics({
   }, [selection, windowMinutes, bucketSeconds]);
 
   return (
-    <section className="grid gap-6 lg:grid-cols-5">
-      <Card className="animate-floatIn lg:col-span-3 [animation-delay:100ms]">
+    <section className="grid gap-6 lg:grid-cols-6">
+      <Card className="animate-floatIn lg:col-span-4 [animation-delay:100ms]">
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
             <CardTitle>Throughput Trend</CardTitle>
@@ -101,6 +101,28 @@ export function ProcessingAnalytics({
 
       <Card className="animate-floatIn lg:col-span-2 [animation-delay:220ms]">
         <CardHeader>
+          <CardTitle>Kafka Topics</CardTitle>
+        </CardHeader>
+
+        <CardContent className="space-y-3">
+          {(snapshot?.topic_distribution ?? []).length === 0 ? (
+            <p className="text-muted-foreground">Waiting for topic samples...</p>
+          ) : (
+            snapshot?.topic_distribution.map((row) => (
+              <DistributionBar
+                key={row.kafka_topic}
+                label={row.kafka_topic}
+                value={row.count}
+                maxValue={snapshot.topic_distribution[0]?.count ?? 1}
+                hue="bg-amber-500/75"
+              />
+            ))
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="animate-floatIn lg:col-span-2 [animation-delay:240ms]">
+        <CardHeader>
           <CardTitle>Kafka Partition Load</CardTitle>
         </CardHeader>
 
@@ -110,8 +132,8 @@ export function ProcessingAnalytics({
           ) : (
             snapshot?.partition_distribution.map((row) => (
               <DistributionBar
-                key={row.kafka_partition}
-                label={`Partition ${row.kafka_partition}`}
+                key={`${row.kafka_topic}-${row.kafka_partition}`}
+                label={`${row.kafka_topic} / p${row.kafka_partition}`}
                 value={row.count}
                 maxValue={snapshot.partition_distribution.reduce(
                   (currentMax, currentRow) => Math.max(currentMax, currentRow.count),
@@ -124,7 +146,7 @@ export function ProcessingAnalytics({
         </CardContent>
       </Card>
 
-      <Card className="animate-floatIn lg:col-span-3 [animation-delay:260ms]">
+      <Card className="animate-floatIn lg:col-span-2 [animation-delay:260ms]">
         <CardHeader>
           <CardTitle>Partition Ownership Matrix</CardTitle>
         </CardHeader>
@@ -133,17 +155,19 @@ export function ProcessingAnalytics({
           {(snapshot?.partition_ownership ?? []).length === 0 ? (
             <p className="text-muted-foreground">Ownership data will appear once events are consumed.</p>
           ) : (
-            <div className="space-y-2">
+            <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
               {snapshot?.partition_ownership.map((row) => (
                 <div
-                  key={`${row.kafka_partition}-${row.processed_by}`}
-                  className="grid grid-cols-[1fr_auto_auto] items-center gap-3 rounded-md border border-border/60 bg-white/50 px-3 py-2 text-xs"
+                  key={`${row.kafka_topic}-${row.kafka_partition}-${row.processed_by}`}
+                  className="grid grid-cols-[auto_1fr_auto] items-center gap-2 rounded-md border border-border/60 bg-white/50 px-2.5 py-1.5 text-[11px]"
                 >
-                  <span className="font-mono text-foreground">
-                    p{row.kafka_partition} - {row.processed_by}
+                  <Badge variant="secondary" className="font-mono text-[10px]">
+                    {row.kafka_topic}
+                  </Badge>
+                  <span className="truncate font-mono text-foreground">
+                    p{row.kafka_partition} / {row.processed_by}
                   </span>
-                  <span className="text-muted-foreground">events</span>
-                  <strong className="font-mono text-sm">{row.count.toLocaleString()}</strong>
+                  <strong className="font-mono text-xs">{row.count.toLocaleString()}</strong>
                 </div>
               ))}
             </div>

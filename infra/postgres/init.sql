@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS events (
     event_type VARCHAR(128) NOT NULL,
     processed_by VARCHAR(64) NOT NULL,
     kafka_partition INTEGER NOT NULL,
+    kafka_topic VARCHAR(128) NOT NULL,
     payload JSONB NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id, created_at)
@@ -13,14 +14,17 @@ CREATE TABLE IF NOT EXISTS events (
 
 ALTER TABLE events ADD COLUMN IF NOT EXISTS processed_by VARCHAR(64) NOT NULL DEFAULT 'unknown';
 ALTER TABLE events ADD COLUMN IF NOT EXISTS kafka_partition INTEGER NOT NULL DEFAULT -1;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS kafka_topic VARCHAR(128) NOT NULL DEFAULT 'unknown_topic';
 ALTER TABLE events ALTER COLUMN processed_by DROP DEFAULT;
 ALTER TABLE events ALTER COLUMN kafka_partition DROP DEFAULT;
+ALTER TABLE events ALTER COLUMN kafka_topic DROP DEFAULT;
 
 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_events_user_created_at ON events (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_events_event_type_created_at ON events (event_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_events_processed_by_created_at ON events (processed_by, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_events_partition_created_at ON events (kafka_partition, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_events_topic_created_at ON events (kafka_topic, created_at DESC);
 
 CREATE OR REPLACE FUNCTION create_daily_events_partition()
 RETURNS TRIGGER

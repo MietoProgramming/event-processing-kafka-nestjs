@@ -11,6 +11,7 @@ export type LatestEventRow = {
   event_type: string;
   processed_by: string;
   kafka_partition: number;
+  kafka_topic: string;
   payload: Record<string, unknown>;
   created_at: string;
 };
@@ -33,7 +34,13 @@ export type EventTypeDistributionRow = {
   count: number;
 };
 
+export type TopicDistributionRow = {
+  kafka_topic: string;
+  count: number;
+};
+
 export type PartitionDistributionRow = {
+  kafka_topic: string;
   kafka_partition: number;
   count: number;
 };
@@ -44,6 +51,7 @@ export type InstanceDistributionRow = {
 };
 
 export type PartitionOwnershipRow = {
+  kafka_topic: string;
   kafka_partition: number;
   processed_by: string;
   count: number;
@@ -57,6 +65,7 @@ export type DashboardAnalyticsSnapshot = {
   total_events_in_window: number;
   throughput: ThroughputPoint[];
   event_type_distribution: EventTypeDistributionRow[];
+  topic_distribution: TopicDistributionRow[];
   partition_distribution: PartitionDistributionRow[];
   instance_distribution: InstanceDistributionRow[];
   partition_ownership: PartitionOwnershipRow[];
@@ -91,6 +100,7 @@ export class StatsService {
         event_type: eventsTable.eventType,
         processed_by: eventsTable.processedBy,
         kafka_partition: eventsTable.kafkaPartition,
+        kafka_topic: eventsTable.kafkaTopic,
         payload: eventsTable.payload,
         created_at: eventsTable.createdAt,
       })
@@ -108,6 +118,7 @@ export class StatsService {
       event_type: string;
       processed_by: string;
       kafka_partition: number;
+      kafka_topic: string;
       payload: Record<string, unknown> | null;
       created_at: Date;
     }) => ({
@@ -116,6 +127,7 @@ export class StatsService {
       event_type: row.event_type,
       processed_by: row.processed_by,
       kafka_partition: row.kafka_partition,
+      kafka_topic: row.kafka_topic,
       payload: row.payload ?? {},
       created_at: row.created_at.toISOString(),
     }));
@@ -178,15 +190,25 @@ export class StatsService {
       .where(whereClause)
       .groupBy(eventsTable.eventType);
 
+    const topicRows = await this.db
+      .select({
+        kafka_topic: eventsTable.kafkaTopic,
+        count: sql<string>`COUNT(*)::text`,
+      })
+      .from(eventsTable)
+      .where(whereClause)
+      .groupBy(eventsTable.kafkaTopic);
+
     const partitionRows = await this.db
       .select({
+        kafka_topic: eventsTable.kafkaTopic,
         kafka_partition: eventsTable.kafkaPartition,
         count: sql<string>`COUNT(*)::text`,
       })
       .from(eventsTable)
       .where(whereClause)
-      .groupBy(eventsTable.kafkaPartition)
-      .orderBy(eventsTable.kafkaPartition);
+      .groupBy(eventsTable.kafkaTopic, eventsTable.kafkaPartition)
+      .orderBy(eventsTable.kafkaTopic, eventsTable.kafkaPartition);
 
     const instanceRows = await this.db
       .select({
@@ -199,14 +221,15 @@ export class StatsService {
 
     const ownershipRows = await this.db
       .select({
+        kafka_topic: eventsTable.kafkaTopic,
         kafka_partition: eventsTable.kafkaPartition,
         processed_by: eventsTable.processedBy,
         count: sql<string>`COUNT(*)::text`,
       })
       .from(eventsTable)
       .where(whereClause)
-      .groupBy(eventsTable.kafkaPartition, eventsTable.processedBy)
-      .orderBy(eventsTable.kafkaPartition, eventsTable.processedBy);
+      .groupBy(eventsTable.kafkaTopic, eventsTable.kafkaPartition, eventsTable.processedBy)
+      .orderBy(eventsTable.kafkaTopic, eventsTable.kafkaPartition, eventsTable.processedBy);
 
     const [windowTotalResult] = await this.db
       .select({
@@ -236,10 +259,19 @@ export class StatsService {
         }))
         .sort((left, right) => right.count - left.count)
         .slice(0, MAX_EVENT_TYPE_BARS),
-      partition_distribution: partitionRows.map((row: { kafka_partition: number; count: string }) => ({
-        kafka_partition: row.kafka_partition,
-        count: Number(row.count),
-      })),
+      topic_distribution: topicRows
+        .map((row: { kafka_topic: string; count: string }) => ({
+          kafka_topic: row.kafka_topic,
+          count: Number(row.count),
+        }))
+        .sort((left, right) => right.count - left.count),
+      partition_distribution: partitionRows.map(
+        (row: { kafka_topic: string; kafka_partition: number; count: string }) => ({
+          kafka_topic: row.kafka_topic,
+          kafka_partition: row.kafka_partition,
+          count: Number(row.count),
+        }),
+      ),
       instance_distribution: instanceRows
         .map((row: { processed_by: string; count: string }) => ({
           processed_by: row.processed_by,
@@ -247,7 +279,8 @@ export class StatsService {
         }))
         .sort((left, right) => right.count - left.count),
       partition_ownership: ownershipRows.map(
-        (row: { kafka_partition: number; processed_by: string; count: string }) => ({
+        (row: { kafka_topic: string; kafka_partition: number; processed_by: string; count: string }) => ({
+          kafka_topic: row.kafka_topic,
           kafka_partition: row.kafka_partition,
           processed_by: row.processed_by,
           count: Number(row.count),

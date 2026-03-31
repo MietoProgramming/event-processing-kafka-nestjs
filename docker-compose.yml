@@ -38,8 +38,16 @@ services:
       - /bin/sh
       - -ec
       - >
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic events.page_views --partitions 6 --replication-factor 1 &&
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic events.page_views
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic events.page_views --partitions 12 --replication-factor 1 &&
+        current_page_views=$$(/opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic events.page_views | sed -n 's/.*PartitionCount: \([0-9][0-9]*\).*/\1/p' | head -n 1) &&
+        if [ "$${current_page_views:-0}" -lt 12 ]; then
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --alter --if-exists --topic events.page_views --partitions 12;
+        fi &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic events.clicks --partitions 6 --replication-factor 1 &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic events.purchases --partitions 3 --replication-factor 1 &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic events.page_views &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic events.clicks &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic events.purchases
     restart: "no"
     networks:
       - event-net
@@ -85,8 +93,10 @@ services:
         condition: service_completed_successfully
     environment:
       KAFKA_BROKERS: kafka:9092
-      KAFKA_TOPIC: events.page_views
       EVENTS_PER_SECOND: "1000"
+      PAGE_VIEWS_PER_SECOND: "700"
+      CLICKS_PER_SECOND: "290"
+      PURCHASES_PER_SECOND: "10"
     restart: unless-stopped
     networks:
       - event-net
@@ -104,7 +114,7 @@ services:
       INSTANCE_ID: backend-1
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/eventsdb
       KAFKA_BROKER: kafka:9092
-      KAFKA_TOPIC: events.page_views
+      KAFKA_TOPICS: events.page_views,events.clicks,events.purchases
       KAFKA_GROUP_ID: analytics-consumer
       KAFKA_CLIENT_ID: analytics-consumer-client
       KAFKA_POSTFIX_ID: ""
@@ -129,7 +139,7 @@ services:
       INSTANCE_ID: backend-2
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/eventsdb
       KAFKA_BROKER: kafka:9092
-      KAFKA_TOPIC: events.page_views
+      KAFKA_TOPICS: events.page_views,events.clicks,events.purchases
       KAFKA_GROUP_ID: analytics-consumer
       KAFKA_CLIENT_ID: analytics-consumer-client
       KAFKA_POSTFIX_ID: ""

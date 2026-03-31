@@ -5,18 +5,26 @@ This repository is a local learning lab for high-throughput event processing:
 - Kafka in KRaft mode (Apache Kafka image, no ZooKeeper)
 - PostgreSQL 16 with declarative daily partitions
 - Kafka UI for topic and consumer-group inspection
-- Node.js event generator publishing exactly 1,000 events/second
+- Node.js event generator publishing exactly 1,000 events/second across 3 topics
 - Two NestJS backend instances in the same Kafka consumer group (`analytics-consumer`)
 - TanStack Start + React dashboard with live stats and latest events table
 
 ## Architecture
 
-1. The generator writes to Kafka topic `events.page_views` with message key=`user_id`.
-2. Kafka partitions route all events for the same user to the same partition.
+1. The generator writes to three Kafka topics at fixed rates (700/290/10 events/sec).
+2. Each topic uses its own partition key so ordering is preserved per entity key.
 3. Two backend containers (`backend-1`, `backend-2`) share the same `groupId` and split partition ownership.
 4. Backend services batch-insert events into PostgreSQL `events` table (RANGE partitioned by `created_at`).
 5. Frontend reads live stats from SSE and fetches latest 100 rows via REST.
-6. Dashboard analytics endpoint powers throughput graphs, partition distribution, and per-instance ownership views.
+6. Dashboard analytics endpoint powers throughput graphs, partition distribution, event-type distribution, and per-instance ownership views.
+
+## Kafka Topic Strategy
+
+| Topic | Volume pattern | Partition key | Default partitions |
+|---|---:|---|---:|
+| `events.page_views` | 700 events/sec | `session_id` | 12 |
+| `events.clicks` | 290 events/sec | `user_id` | 6 |
+| `events.purchases` | 10 events/sec | `order_id` | 3 |
 
 ## Project Structure
 
@@ -64,7 +72,7 @@ curl "http://localhost:3001/api/dashboard/analytics?windowMinutes=15&bucketSecon
 
 ### In Kafka UI
 
-1. Open `events.page_views` topic and confirm multiple partitions.
+1. Open `events.page_views`, `events.clicks`, and `events.purchases` and confirm partitions exist for each.
 2. Open Consumer Groups and select `analytics-consumer`.
 3. Confirm there are two members and partition assignments are split across them.
 
@@ -107,6 +115,7 @@ SELECT COUNT(*) FROM events;
 
 - PostgreSQL trigger `create_daily_events_partition()` creates a day partition at insert time if missing.
 - Backend persists `processed_by` and `kafka_partition` metadata per event for partition-aware analytics.
+- Backend consumes `events.page_views`, `events.clicks`, and `events.purchases`, and normalizes `event_type` by topic to avoid bad producer payloads.
 - Backend metrics endpoint uses database aggregates so stats stay accurate across both backend instances.
 - SSE endpoint: `/api/stats/stream`.
 - Latest events endpoint: `/api/events/latest?limit=100&processedBy=backend-1`.
