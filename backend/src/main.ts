@@ -14,6 +14,13 @@ async function bootstrap(): Promise<void> {
   const kafkaPostfixId = process.env.KAFKA_POSTFIX_ID ?? '';
   const kafkaClientIdBase = process.env.KAFKA_CLIENT_ID ?? 'analytics-consumer-client';
   const kafkaClientId = `${kafkaClientIdBase}-${instanceId}`;
+  const parsedPartitionsConcurrency = Number(
+    process.env.KAFKA_PARTITIONS_CONSUMED_CONCURRENCY ?? 6,
+  );
+  const partitionsConsumedConcurrently =
+    Number.isInteger(parsedPartitionsConcurrency) && parsedPartitionsConcurrency > 0
+      ? parsedPartitionsConcurrency
+      : 6;
   const kafkaTopics = (process.env.KAFKA_TOPICS ?? 'events.page_views,events.clicks,events.purchases')
     .split(',')
     .map((topic) => topic.trim())
@@ -41,7 +48,7 @@ async function bootstrap(): Promise<void> {
       },
       run: {
         autoCommit: true,
-        partitionsConsumedConcurrently: 1,
+        partitionsConsumedConcurrently,
       },
       postfixId: kafkaPostfixId,
     },
@@ -52,6 +59,7 @@ async function bootstrap(): Promise<void> {
 
   logger.log(`HTTP listening on :${httpPort}`);
   logger.log(`Kafka broker=${kafkaBroker} topics=${kafkaTopics.join(',')} groupId=${kafkaGroupId}`);
+  logger.log(`Kafka partitionsConsumedConcurrently=${partitionsConsumedConcurrently}`);
   logger.log(`Instance ID=${instanceId}`);
 }
 

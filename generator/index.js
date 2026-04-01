@@ -5,10 +5,10 @@ const brokers = (process.env.KAFKA_BROKERS || 'kafka:9092')
   .split(',')
   .map((broker) => broker.trim())
   .filter((broker) => broker.length > 0);
-const eventsPerSecond = Number(process.env.EVENTS_PER_SECOND || 1000);
-const pageViewsPerSecond = Number(process.env.PAGE_VIEWS_PER_SECOND || 700);
-const clicksPerSecond = Number(process.env.CLICKS_PER_SECOND || 290);
-const purchasesPerSecond = Number(process.env.PURCHASES_PER_SECOND || 10);
+const eventsPerSecond = Number(process.env.EVENTS_PER_SECOND || 10000);
+const pageViewsPerSecond = Number(process.env.PAGE_VIEWS_PER_SECOND || 7000);
+const clicksPerSecond = Number(process.env.CLICKS_PER_SECOND || 2900);
+const purchasesPerSecond = Number(process.env.PURCHASES_PER_SECOND || 100);
 
 const ticksPerSecond = 10;
 const tickIntervalMs = 1000 / ticksPerSecond;

@@ -1,8 +1,9 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { Link, createFileRoute } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 import { EventsTable } from '~/components/events-table';
 import { MetricsCard } from '~/components/metrics-card';
 import { ProcessingAnalytics } from '~/components/processing-analytics';
+import { Badge } from '~/components/ui/badge';
 import {
     fetchLatestEvents,
     getBackendSources,
@@ -60,6 +61,16 @@ export function DashboardPage() {
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-8 sm:px-8">
       <header className="animate-floatIn">
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <Badge variant="outline">Live Dashboard</Badge>
+          <Link
+            to="/analytics"
+            className="rounded-full border border-border/80 bg-white/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-foreground transition hover:bg-white"
+          >
+            Open Analytics Studio
+          </Link>
+        </div>
+
         <p className="mb-2 font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
           Kafka + NestJS + Drizzle
         </p>

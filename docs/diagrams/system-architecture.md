@@ -8,9 +8,9 @@ flowchart LR
   end
 
   subgraph Infra[Docker Network]
-    KAFKA[Kafka Broker<br/>Topic: events.page_views<br/>6 partitions]
+    KAFKA[Kafka Broker<br/>Topics: page_views(12), clicks(6), purchases(3)]
     KUI[Kafka UI]
-    GEN[Event Generator<br/>1000 events/sec]
+    GEN[Event Generator<br/>10000 events/sec]
     subgraph BEG[Consumer Group: analytics-consumer]
       B1[Backend-1 NestJS]
       B2[Backend-2 NestJS]

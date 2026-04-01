@@ -54,6 +54,14 @@ services:
 
   postgres:
     image: postgres:16
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=10
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -68,6 +76,97 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    networks:
+      - event-net
+
+  postgres-replication-setup:
+    image: postgres:16
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: postgres
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        hba_file=/var/lib/postgresql/data/pg_hba.conf
+        if ! grep -q "host replication replicator all scram-sha-256" "$$hba_file"; then
+          echo "host replication replicator all scram-sha-256" >> "$$hba_file"
+        fi
+        if ! psql -h postgres -U postgres -d eventsdb -tAc "SELECT 1 FROM pg_roles WHERE rolname='replicator'" | grep -q 1; then
+          psql -h postgres -U postgres -d eventsdb -c "CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD 'replicator';"
+        fi
+        psql -h postgres -U postgres -d eventsdb -c "SELECT pg_reload_conf();"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    restart: "no"
+    networks:
+      - event-net
+
+  postgres-replica-1:
+    image: postgres:16
+    depends_on:
+      postgres-replication-setup:
+        condition: service_completed_successfully
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
+          rm -rf /var/lib/postgresql/data/*
+          export PGPASSWORD=replicator
+          until pg_basebackup --host=postgres --port=5432 --username=replicator --pgdata=/var/lib/postgresql/data --wal-method=stream --write-recovery-conf --progress; do
+            echo "Waiting for primary to accept replication connections..."
+            sleep 2
+          done
+          chmod 700 /var/lib/postgresql/data
+        fi
+        chown -R postgres:postgres /var/lib/postgresql/data
+        exec gosu postgres postgres -c hot_standby=on
+    ports:
+      - "5433:5432"
+    volumes:
+      - pg_replica_1_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d eventsdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    networks:
+      - event-net
+
+  postgres-replica-2:
+    image: postgres:16
+    depends_on:
+      postgres-replication-setup:
+        condition: service_completed_successfully
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
+          rm -rf /var/lib/postgresql/data/*
+          export PGPASSWORD=replicator
+          until pg_basebackup --host=postgres --port=5432 --username=replicator --pgdata=/var/lib/postgresql/data --wal-method=stream --write-recovery-conf --progress; do
+            echo "Waiting for primary to accept replication connections..."
+            sleep 2
+          done
+          chmod 700 /var/lib/postgresql/data
+        fi
+        chown -R postgres:postgres /var/lib/postgresql/data
+        exec gosu postgres postgres -c hot_standby=on
+    ports:
+      - "5434:5432"
+    volumes:
+      - pg_replica_2_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d eventsdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
     networks:
       - event-net
 
@@ -93,10 +192,10 @@ services:
         condition: service_completed_successfully
     environment:
       KAFKA_BROKERS: kafka:9092
-      EVENTS_PER_SECOND: "1000"
-      PAGE_VIEWS_PER_SECOND: "700"
-      CLICKS_PER_SECOND: "290"
-      PURCHASES_PER_SECOND: "10"
+      EVENTS_PER_SECOND: "10000"
+      PAGE_VIEWS_PER_SECOND: "7000"
+      CLICKS_PER_SECOND: "2900"
+      PURCHASES_PER_SECOND: "100"
     restart: unless-stopped
     networks:
       - event-net
@@ -109,17 +208,23 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
+      postgres-replica-1:
+        condition: service_healthy
+      postgres-replica-2:
+        condition: service_healthy
     environment:
       PORT: "3001"
       INSTANCE_ID: backend-1
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/eventsdb
+      DATABASE_READ_URLS: postgresql://postgres:postgres@postgres-replica-1:5432/eventsdb,postgresql://postgres:postgres@postgres-replica-2:5432/eventsdb
       KAFKA_BROKER: kafka:9092
       KAFKA_TOPICS: events.page_views,events.clicks,events.purchases
       KAFKA_GROUP_ID: analytics-consumer
       KAFKA_CLIENT_ID: analytics-consumer-client
       KAFKA_POSTFIX_ID: ""
-      BATCH_SIZE: "500"
-      FLUSH_INTERVAL_MS: "500"
+      KAFKA_PARTITIONS_CONSUMED_CONCURRENCY: "6"
+      BATCH_SIZE: "2000"
+      FLUSH_INTERVAL_MS: "200"
     ports:
       - "3001:3001"
     restart: unless-stopped
@@ -134,17 +239,23 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
+      postgres-replica-1:
+        condition: service_healthy
+      postgres-replica-2:
+        condition: service_healthy
     environment:
       PORT: "3002"
       INSTANCE_ID: backend-2
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/eventsdb
+      DATABASE_READ_URLS: postgresql://postgres:postgres@postgres-replica-1:5432/eventsdb,postgresql://postgres:postgres@postgres-replica-2:5432/eventsdb
       KAFKA_BROKER: kafka:9092
       KAFKA_TOPICS: events.page_views,events.clicks,events.purchases
       KAFKA_GROUP_ID: analytics-consumer
       KAFKA_CLIENT_ID: analytics-consumer-client
       KAFKA_POSTFIX_ID: ""
-      BATCH_SIZE: "500"
-      FLUSH_INTERVAL_MS: "500"
+      KAFKA_PARTITIONS_CONSUMED_CONCURRENCY: "6"
+      BATCH_SIZE: "2000"
+      FLUSH_INTERVAL_MS: "200"
     ports:
       - "3002:3002"
     restart: unless-stopped
@@ -171,6 +282,8 @@ services:
 
 volumes:
   pg_data:
+  pg_replica_1_data:
+  pg_replica_2_data:
 
 networks:
   event-net:

@@ -64,6 +64,44 @@ export type DashboardAnalyticsSnapshot = {
   partition_ownership: PartitionOwnershipRow[];
 };
 
+export type AggregateRangeKey = '24h' | '7d' | '30d' | '365d' | '5y';
+export type AggregateBucketKey = '1h' | '1d' | '1m' | '1y';
+
+export type AggregateSeriesPoint = {
+  bucket_start: string;
+  count: number;
+};
+
+export type WeekdayDistributionRow = {
+  weekday: number;
+  label: string;
+  count: number;
+};
+
+export type HourDistributionRow = {
+  hour: number;
+  count: number;
+};
+
+export type DashboardAggregateSnapshot = {
+  generated_at: string;
+  range_key: AggregateRangeKey;
+  bucket_key: AggregateBucketKey;
+  top_n: number;
+  processed_by_filter: string | null;
+  total_events: number;
+  previous_period_total_events: number;
+  delta_percentage_vs_previous: number | null;
+  unique_users: number;
+  average_events_per_bucket: number;
+  series: AggregateSeriesPoint[];
+  event_type_distribution: EventTypeDistributionRow[];
+  topic_distribution: TopicDistributionRow[];
+  instance_distribution: InstanceDistributionRow[];
+  weekday_distribution: WeekdayDistributionRow[];
+  hour_distribution: HourDistributionRow[];
+};
+
 export type BackendSource = {
   id: string;
   label: string;
@@ -92,6 +130,14 @@ type LatestEventsRequest = {
 type DashboardAnalyticsRequest = {
   windowMinutes?: number;
   bucketSeconds?: number;
+  processedBy?: string;
+  sourceId?: string;
+};
+
+type DashboardAggregateRequest = {
+  rangeKey?: AggregateRangeKey;
+  bucketKey?: AggregateBucketKey;
+  topN?: number;
   processedBy?: string;
   sourceId?: string;
 };
@@ -344,6 +390,28 @@ export async function fetchDashboardAnalytics(
   }
 
   return withFailover<DashboardAnalyticsSnapshot>(path);
+}
+
+export async function fetchDashboardAggregates(
+  options: DashboardAggregateRequest = {},
+): Promise<DashboardAggregateSnapshot> {
+  const params = new URLSearchParams();
+  params.set('range', options.rangeKey ?? '30d');
+  params.set('bucket', options.bucketKey ?? '1d');
+  params.set('topN', String(options.topN ?? 8));
+
+  if (options.processedBy) {
+    params.set('processedBy', options.processedBy);
+  }
+
+  const path = `/dashboard/aggregates${toQueryString(params)}`;
+  const source = options.sourceId ? getSourceById(options.sourceId) : null;
+
+  if (source) {
+    return fetchFromSource<DashboardAggregateSnapshot>(path, source);
+  }
+
+  return withFailover<DashboardAggregateSnapshot>(path);
 }
 
 export function startStatsPolling(

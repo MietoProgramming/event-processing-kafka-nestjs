@@ -11,6 +11,9 @@ import {
 import { Observable, catchError, from, interval, map, of, startWith, switchMap } from 'rxjs';
 import {
     StatsService,
+    type AggregateBucketKey,
+    type AggregateRangeKey,
+    type DashboardAggregateSnapshot,
     type DashboardAnalyticsSnapshot,
     type LatestEventRow,
     type StatsSnapshot,
@@ -45,6 +48,21 @@ export class AppController {
     return this.statsService.getDashboardAnalytics({
       windowMinutes,
       bucketSeconds,
+      processedBy,
+    });
+  }
+
+  @Get('dashboard/aggregates')
+  async getDashboardAggregates(
+    @Query('range', new DefaultValuePipe('30d')) range: AggregateRangeKey,
+    @Query('bucket', new DefaultValuePipe('1d')) bucket: AggregateBucketKey,
+    @Query('topN', new DefaultValuePipe(8), ParseIntPipe) topN: number,
+    @Query('processedBy') processedBy?: string,
+  ): Promise<DashboardAggregateSnapshot> {
+    return this.statsService.getDashboardAggregates({
+      rangeKey: range,
+      bucketKey: bucket,
+      topN,
       processedBy,
     });
   }
