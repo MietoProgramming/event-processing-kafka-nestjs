@@ -12,6 +12,9 @@ CREATE TABLE IF NOT EXISTS events (
     PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);
 
+CREATE TABLE IF NOT EXISTS events_default
+PARTITION OF events DEFAULT;
+
 ALTER TABLE events ADD COLUMN IF NOT EXISTS processed_by VARCHAR(64) NOT NULL DEFAULT 'unknown';
 ALTER TABLE events ADD COLUMN IF NOT EXISTS kafka_partition INTEGER NOT NULL DEFAULT -1;
 ALTER TABLE events ADD COLUMN IF NOT EXISTS kafka_topic VARCHAR(128) NOT NULL DEFAULT 'unknown_topic';
@@ -40,6 +43,13 @@ BEGIN
     partition_name := format('events_%s', to_char(partition_start, 'YYYYMMDD'));
 
     PERFORM pg_advisory_xact_lock(hashtext('events_partition_lock'));
+
+    BEGIN
+        EXECUTE 'CREATE TABLE IF NOT EXISTS events_default PARTITION OF events DEFAULT;';
+    EXCEPTION
+        WHEN duplicate_table THEN
+            NULL;
+    END;
 
     BEGIN
         EXECUTE format(

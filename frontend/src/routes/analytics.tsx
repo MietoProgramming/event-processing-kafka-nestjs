@@ -3,17 +3,17 @@ import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '~/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card';
 import {
-    fetchDashboardAggregates,
-    getBackendSources,
-    selectionToProcessedBy,
-    selectionToSourceId,
-    type AggregateBucketKey,
-    type AggregateRangeKey,
-    type AggregateSeriesPoint,
-    type BackendSelection,
-    type DashboardAggregateSnapshot,
-    type HourDistributionRow,
-    type WeekdayDistributionRow,
+  fetchDashboardAggregates,
+  getBackendSources,
+  selectionToProcessedBy,
+  selectionToSourceId,
+  type AggregateBucketKey,
+  type AggregateRangeKey,
+  type AggregateSeriesPoint,
+  type BackendSelection,
+  type DashboardAggregateSnapshot,
+  type HourDistributionRow,
+  type WeekdayDistributionRow,
 } from '~/lib/api';
 
 const RANGE_OPTIONS: Array<{ value: AggregateRangeKey; label: string }> = [
@@ -56,12 +56,52 @@ export function AnalyticsPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [lastSuccessAt, setLastSuccessAt] = useState<string | null>(null);
   const [lastErrorAt, setLastErrorAt] = useState<string | null>(null);
+  const [lastLoadMs, setLastLoadMs] = useState<number | null>(null);
+  const [loadingElapsedMs, setLoadingElapsedMs] = useState<number | null>(null);
 
   useEffect(() => {
     let mounted = true;
+    let refreshTimer: ReturnType<typeof setInterval> | null = null;
+    let loadTimer: ReturnType<typeof setInterval> | null = null;
+    let loadStartMs = 0;
+
+    const startLoadTimer = () => {
+      loadStartMs = performance.now();
+
+      if (mounted) {
+        setLoadingElapsedMs(0);
+      }
+
+      if (loadTimer) {
+        clearInterval(loadTimer);
+      }
+
+      loadTimer = setInterval(() => {
+        if (mounted) {
+          setLoadingElapsedMs(performance.now() - loadStartMs);
+        }
+      }, 100);
+    };
+
+    const stopLoadTimer = (didSucceed: boolean) => {
+      if (loadTimer) {
+        clearInterval(loadTimer);
+        loadTimer = null;
+      }
+
+      if (mounted) {
+        setLoadingElapsedMs(null);
+
+        if (didSucceed) {
+          setLastLoadMs(performance.now() - loadStartMs);
+        }
+      }
+    };
 
     const load = async () => {
       setIsLoading(true);
+      startLoadTimer();
+      let didSucceed = false;
 
       try {
         const nextSnapshot = await fetchDashboardAggregates({
@@ -76,6 +116,7 @@ export function AnalyticsPage() {
           setSnapshot(nextSnapshot);
           setLastSuccessAt(new Date().toISOString());
         }
+        didSucceed = true;
       } catch (_error) {
         if (mounted) {
           setLastErrorAt(new Date().toISOString());
@@ -84,24 +125,28 @@ export function AnalyticsPage() {
         if (mounted) {
           setIsLoading(false);
         }
+        stopLoadTimer(didSucceed);
       }
     };
 
     void load();
 
-    if (refreshMs <= 0) {
-      return () => {
-        mounted = false;
-      };
+    if (refreshMs > 0) {
+      refreshTimer = setInterval(() => {
+        void load();
+      }, refreshMs);
     }
-
-    const timer = setInterval(() => {
-      void load();
-    }, refreshMs);
 
     return () => {
       mounted = false;
-      clearInterval(timer);
+
+      if (refreshTimer) {
+        clearInterval(refreshTimer);
+      }
+
+      if (loadTimer) {
+        clearInterval(loadTimer);
+      }
     };
   }, [bucketKey, rangeKey, refreshMs, selection, topN]);
 
@@ -116,6 +161,13 @@ export function AnalyticsPage() {
       return currentPeak;
     }, null);
   }, [snapshot?.series]);
+
+  const loadTimeLabel =
+    loadingElapsedMs !== null
+      ? `Loading: ${formatDuration(loadingElapsedMs)}`
+      : lastLoadMs !== null
+      ? `Last load: ${formatDuration(lastLoadMs)}`
+      : null;
 
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-8 sm:px-8">
@@ -284,6 +336,7 @@ export function AnalyticsPage() {
                   ? `${peakPoint.count.toLocaleString()} at ${formatBucketLabel(peakPoint.bucket_start, bucketKey)}`
                   : 'n/a'}
               </span>
+              {loadTimeLabel ? <span>{loadTimeLabel}</span> : null}
               {lastSuccessAt ? (
                 <span>Last updated at {new Date(lastSuccessAt).toLocaleTimeString()}</span>
               ) : null}
@@ -385,6 +438,24 @@ export function AnalyticsPage() {
             />
           </CardContent>
         </Card>
+
+        <Card className="animate-floatIn lg:col-span-3 [animation-delay:260ms]">
+          <CardHeader>
+            <CardTitle>Cumulative Events</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <CumulativeSeriesChart points={snapshot?.series ?? []} bucketKey={bucketKey} />
+          </CardContent>
+        </Card>
+
+        <Card className="animate-floatIn lg:col-span-3 [animation-delay:280ms]">
+          <CardHeader>
+            <CardTitle>Bucket Momentum</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <BucketDeltaChart points={snapshot?.series ?? []} bucketKey={bucketKey} />
+          </CardContent>
+        </Card>
       </section>
     </main>
   );
@@ -473,6 +544,109 @@ function AggregateSeriesChart({ points, bucketKey, showMovingAverage }: Aggregat
           {points[points.length - 1]?.count.toLocaleString() ?? 0}
         </span>
         <span>{formatBucketLabel(points[points.length - 1]?.bucket_start ?? '', bucketKey)}</span>
+      </div>
+    </div>
+  );
+}
+
+type CumulativeSeriesChartProps = {
+  points: AggregateSeriesPoint[];
+  bucketKey: AggregateBucketKey;
+};
+
+function CumulativeSeriesChart({ points, bucketKey }: CumulativeSeriesChartProps) {
+  const cumulativePoints = useMemo(() => calculateCumulativeSeries(points), [points]);
+  const shape = useMemo(() => createSeriesShape(cumulativePoints), [cumulativePoints]);
+
+  if (points.length === 0) {
+    return (
+      <div className="flex h-52 items-center justify-center rounded-lg border border-border/60 bg-white/45 text-muted-foreground">
+        Waiting for cumulative samples...
+      </div>
+    );
+  }
+
+  const total = cumulativePoints[cumulativePoints.length - 1]?.count ?? 0;
+
+  return (
+    <div className="space-y-2">
+      <svg
+        className="h-52 w-full rounded-lg border border-border/60 bg-white/45"
+        viewBox={`0 0 ${shape.width} ${shape.height}`}
+        preserveAspectRatio="none"
+        role="img"
+        aria-label="Cumulative events trend"
+      >
+        <defs>
+          <linearGradient id="cumulative-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgba(16, 185, 129, 0.35)" />
+            <stop offset="100%" stopColor="rgba(16, 185, 129, 0.06)" />
+          </linearGradient>
+        </defs>
+
+        <path d={shape.areaPath} fill="url(#cumulative-fill)" />
+        <path d={shape.linePath} fill="none" stroke="rgb(16, 185, 129)" strokeWidth="2.8" />
+      </svg>
+
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span>{formatBucketLabel(points[0]?.bucket_start ?? '', bucketKey)}</span>
+        <span>Total {total.toLocaleString()}</span>
+        <span>{formatBucketLabel(points[points.length - 1]?.bucket_start ?? '', bucketKey)}</span>
+      </div>
+    </div>
+  );
+}
+
+type BucketDeltaChartProps = {
+  points: AggregateSeriesPoint[];
+  bucketKey: AggregateBucketKey;
+};
+
+function BucketDeltaChart({ points, bucketKey }: BucketDeltaChartProps) {
+  const chart = useMemo(() => createDeltaShape(points), [points]);
+
+  if (points.length === 0) {
+    return (
+      <div className="flex h-52 items-center justify-center rounded-lg border border-border/60 bg-white/45 text-muted-foreground">
+        Waiting for momentum samples...
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <svg
+        className="h-52 w-full rounded-lg border border-border/60 bg-white/45"
+        viewBox={`0 0 ${chart.width} ${chart.height}`}
+        preserveAspectRatio="none"
+        role="img"
+        aria-label="Events per bucket change"
+      >
+        <line
+          x1={chart.xPadding}
+          x2={chart.width - chart.xPadding}
+          y1={chart.baseline}
+          y2={chart.baseline}
+          stroke="rgba(15, 23, 42, 0.25)"
+          strokeDasharray="6 5"
+        />
+        {chart.bars.map((bar, index) => (
+          <rect
+            key={`${bar.x}-${index}`}
+            x={bar.x}
+            y={bar.y}
+            width={bar.width}
+            height={bar.height}
+            fill={bar.isPositive ? 'rgba(16, 185, 129, 0.75)' : 'rgba(244, 63, 94, 0.7)'}
+            rx={2}
+          />
+        ))}
+      </svg>
+
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span>{formatBucketLabel(points[0]?.bucket_start ?? '', bucketKey)}</span>
+        <span>max swing {chart.maxAbs.toLocaleString()}</span>
+        <span>last change {formatSignedCount(chart.lastDelta)}</span>
       </div>
     </div>
   );
@@ -597,6 +771,78 @@ function createSeriesShape(points: AggregateSeriesPoint[]): SeriesShape {
   };
 }
 
+type DeltaBar = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  isPositive: boolean;
+};
+
+type DeltaShape = {
+  width: number;
+  height: number;
+  baseline: number;
+  maxAbs: number;
+  lastDelta: number;
+  bars: DeltaBar[];
+  xPadding: number;
+};
+
+function createDeltaShape(points: AggregateSeriesPoint[]): DeltaShape {
+  const width = 1100;
+  const height = 240;
+  const xPadding = 24;
+  const yPadding = 24;
+  const deltas = points.map((point, index) => {
+    const previous = points[index - 1];
+    return previous ? point.count - previous.count : 0;
+  });
+  const maxAbs = Math.max(1, ...deltas.map((value) => Math.abs(value)));
+  const barCount = Math.max(deltas.length, 1);
+  const slotWidth = (width - xPadding * 2) / barCount;
+  const barWidth = Math.max(slotWidth * 0.82, 1);
+  const usableHalf = Math.max((height - yPadding * 2) / 2, 1);
+  const baseline = yPadding + usableHalf;
+
+  const bars = deltas.map((delta, index) => {
+    const magnitude = Math.abs(delta);
+    const barHeight = (magnitude / maxAbs) * usableHalf;
+    const x = xPadding + index * slotWidth + (slotWidth - barWidth) / 2;
+    const y = delta >= 0 ? baseline - barHeight : baseline;
+
+    return {
+      x,
+      y,
+      width: barWidth,
+      height: barHeight,
+      isPositive: delta >= 0,
+    };
+  });
+
+  return {
+    width,
+    height,
+    baseline,
+    maxAbs,
+    lastDelta: deltas[deltas.length - 1] ?? 0,
+    bars,
+    xPadding,
+  };
+}
+
+function calculateCumulativeSeries(points: AggregateSeriesPoint[]): AggregateSeriesPoint[] {
+  let total = 0;
+
+  return points.map((point) => {
+    total += point.count;
+    return {
+      bucket_start: point.bucket_start,
+      count: total,
+    };
+  });
+}
+
 function calculateMovingAverage(
   points: AggregateSeriesPoint[],
   windowSize: number,
@@ -619,6 +865,12 @@ function calculateMovingAverage(
   }
 
   return result;
+}
+
+function formatSignedCount(value: number): string {
+  const rounded = Math.round(value);
+  const prefix = rounded >= 0 ? '+' : '';
+  return `${prefix}${rounded.toLocaleString()}`;
 }
 
 function formatBucketLabel(value: string, bucketKey: AggregateBucketKey): string {
@@ -654,4 +906,20 @@ function formatDelta(value: number | null): string {
 
   const prefix = value >= 0 ? '+' : '';
   return `${prefix}${value.toFixed(2)}%`;
+}
+
+function formatDuration(durationMs: number): string {
+  if (!Number.isFinite(durationMs) || durationMs < 0) {
+    return '-';
+  }
+
+  if (durationMs < 1000) {
+    return `${Math.round(durationMs)}ms`;
+  }
+
+  if (durationMs < 10000) {
+    return `${(durationMs / 1000).toFixed(2)}s`;
+  }
+
+  return `${(durationMs / 1000).toFixed(1)}s`;
 }
